@@ -18,6 +18,7 @@ class DefaultViewController: UIViewController {
     private lazy var scanStartButton = UIButton().then {
         $0.setTitle("스캔 시작", for: .normal)
         $0.setTitleColor(.blue, for: .normal)
+        $0.addTarget(self, action: #selector(pushToScanView), for: .touchUpInside)
     }
 
     private lazy var testLabel = UILabel().then {
@@ -30,13 +31,18 @@ class DefaultViewController: UIViewController {
 
         addSubviews()
         setupContstraints()
+    }
 
-
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
     }
 
     func addSubviews() {
         view.backgroundColor = .white
-        view.addSubview(testLabel)
+//        view.addSubview(testLabel)
+        [testLabel, scanStartButton].forEach {
+            view.addSubview($0)
+        }
     }
 
     func setupContstraints() {
@@ -44,13 +50,20 @@ class DefaultViewController: UIViewController {
         testLabel.snp.makeConstraints { make in
             make.center.equalToSuperview()
         }
+
+        scanStartButton.snp.makeConstraints { make in
+            make.centerX.equalToSuperview()
+            make.bottom.equalToSuperview().offset(-120)
+            make.width.equalTo(50)
+            make.width.equalTo(25)
+        }
     }
 
 }
 
 extension DefaultViewController {
 
-    func pushToScanView() {
+    @objc func pushToScanView() {
 
         let nextView = ScanViewController()
 
