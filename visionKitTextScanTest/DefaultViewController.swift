@@ -25,6 +25,7 @@ class DefaultViewController: UIViewController {
         $0.text = "Hello, World!"
         $0.textColor = .black
     }
+    
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -61,13 +62,26 @@ class DefaultViewController: UIViewController {
 
 }
 
-extension DefaultViewController {
+extension DefaultViewController: ScanDelegate {
 
     @objc func pushToScanView() {
 
-        let nextView = ScanViewController()
+//        let nextView = ScanViewController()
+//        navigationController?.pushViewController(nextView, animated: true)
+        let nextView = VNDocumentCameraViewController()
+        nextView.delegate = self
 
-        navigationController?.pushViewController(nextView, animated: true)
+        present(nextView, animated: true)
+    }
+
+    func resultString(string: String) {
+        testLabel.text = string
     }
 }
 
+extension DefaultViewController: VNDocumentCameraViewControllerDelegate {
+    
+    func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
+        
+    }
+}
