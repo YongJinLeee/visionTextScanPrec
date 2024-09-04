@@ -12,7 +12,6 @@ import VisionKit
 import AVFoundation
 
 protocol ScanDelegate: AnyObject {
-
     func resultString(string: String)
 }
 
@@ -20,109 +19,129 @@ class ScanViewController: UIViewController {
 
     weak var delegate: ScanDelegate?
 
-    private var captureSession: AVCaptureSession?
-    private var previewLayer: AVCaptureVideoPreviewLayer?
-    private var photoOutput = AVCapturePhotoOutput()
-    private var photoSettings: AVCapturePhotoSettings?
+    private var captureSession: AVCaptureSession!
+    private var previewLayer: AVCaptureVideoPreviewLayer!
 
 
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        scanStart()
-    }
-
-    private func scanStart() {
-
-//        let handler = VNImageRequestHandler(cgImage: CGImage)
-        let request = VNRecognizeTextRequest { [weak self] response, error in
-            guard let self = self else { return }
-
-            guard let observations = response.results as? [VNRecognizedTextObservation], error == nil  else { return }
-
-            let text = observations.compactMap ({
-                $0.topCandidates(1).first?.string
-            }).joined(separator: "-")
-
-            DispatchQueue.main.async {
-                self.delegate?.resultString(string: text)
-                print(text, "전달완료")
-            }
-        }
-        let revision3 = VNRecognizeTextRequestRevision3
-        request.revision = revision3
-        request.recognitionLevel = .fast
-        request.recognitionLanguages = ["en-US"]
-        request.usesLanguageCorrection = false
-
-        do { 
-            var possibleLanguages: Array<String> = []
-            possibleLanguages = try request.supportedRecognitionLanguages()
-            print(possibleLanguages, "\n끝")
-
-        } catch {
-            print("인식 에러")
-        }
+        setupCamera()
     }
 }
 
 extension ScanViewController {
 
-    private func setupInput() {
+    private func setupCamera() {
 
-        var backCamera: AVCaptureDevice?
+        captureSession = AVCaptureSession()
+        guard let videoCaptureDevice = AVCaptureDevice.default(for: .video)
+        else { return }
 
-        if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) {
-            backCamera = device
+        let videoInput: AVCaptureDeviceInput
+
+        do {
+            videoInput = try AVCaptureDeviceInput(device: videoCaptureDevice)
+        } catch {
+            return
+        }
+
+        if (captureSession.canAddInput(videoInput)) {
+            captureSession.addInput(videoInput)
         } else {
-            fatalError("후면 카메라 사용불가")
+            return
+        }
+
+        let photoOutput = AVCapturePhotoOutput()
+        if (captureSession.canAddOutput(photoOutput)) {
+            captureSession.addOutput(photoOutput)
+        } else {
+            return
         }
         
-        // AF 기능 활성화
+        previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
+        previewLayer.frame = view.layer.bounds
+        previewLayer.videoGravity = .resizeAspectFill
+        view.layer.addSublayer(previewLayer)
+
+//        DispatchQueue.main.async {
+//            self.captureSession.startRunning()
+//        }
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            self.captureSession.startRunning()
+        }
+
+        // 사진 촬영 버튼 추가
+        let captureButton = UIButton(frame: CGRect(x: 100, y: 100, width: 100, height: 50))
+        captureButton.setTitle("촬영!", for: .normal)
+        captureButton.backgroundColor = .blue
+        captureButton.addTarget(self, action: #selector(capturePhoto), for: .touchUpInside)
+        view.addSubview(captureButton)
+    }
+
+    @objc func capturePhoto() {
+        let photoOutput = captureSession.outputs.first as! AVCapturePhotoOutput
+        let settings = AVCapturePhotoSettings()
+        photoOutput.capturePhoto(with: settings, delegate: self)
+      }
+}
+
+extension ScanViewController: AVCapturePhotoCaptureDelegate {
+
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+           guard let imageData = photo.fileDataRepresentation(),
+                 let image = UIImage(data: imageData) else { return }
+
+           recognizeText(from: image)
+       }
+
+    func recognizeText(from image: UIImage) {
+
+        guard let cgImage = image.cgImage
+        else { return }
+
+        let request = VNRecognizeTextRequest { (request, error) in
+            if let results = request.results as? [VNRecognizedTextObservation] {
+                var recognizedText = ""
+                for observation in results {
+                    if let topcandidate = observation.topCandidates(1).first {
+                        recognizedText += topcandidate.string + "\n"
+                    }
+                }
+                self.extractCodes(from: recognizedText)
+            }
+        }
+
+        request.recognitionLevel = .fast
+        request.recognitionLanguages = ["en-US"]
+        request.usesLanguageCorrection = false
+
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+
         do {
-            try backCamera?.lockForConfiguration()
-            backCamera?.focusMode = .continuousAutoFocus
-            backCamera?.unlockForConfiguration()
+            try handler.perform([request])
         } catch {
-            fatalError("후면 카메라 오토포커싱 처리 오류")
-        }
-
-        guard let backCamera = backCamera,
-              let backCameraInput = try? AVCaptureDeviceInput(device: backCamera) 
-        else { fatalError("후면 카메라 기능 시작 오류") }
-
-        if let captureSession = captureSession,
-           !captureSession.canAddInput(backCameraInput) {
-            fatalError("후면 카메라 캡쳐세션 초기화 오류")
-        }
-
-        captureSession?.addInput(backCameraInput)
-    }
-
-    private func setupOutput() {
-
-        if self.photoOutput.availablePhotoCodecTypes.contains(.hevc) {
-
-            photoSettings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
-        } else {
-            photoSettings = AVCapturePhotoSettings()
+            print("텍스트 인식 및 검출 실패 :  \(error)")
         }
     }
 
-    func setupCameraSession() {
-        captureSession = AVCaptureSession()
-        captureSession?.beginConfiguration()
+    func extractCodes(from text: String) {
+        let regexPattern = "\\b[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}\\b|\\b[A-Z0-9]{16}\\b"
+        let regex = try? NSRegularExpression(pattern: regexPattern, options: [])
 
-        if let captureSession = captureSession,
-           captureSession.canSetSessionPreset(.photo) {
-            captureSession.sessionPreset = .photo
+        let matches = regex?.matches(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count))
+
+        if let matches = matches {
+            for match in matches {
+                if let range = Range(match.range, in: text) {
+                    let code = text[range]
+                    print("검출 된 코드 \(code)")
+                    delegate?.resultString(string: String(code))
+
+                    navigationController?.popViewController(animated: true)
+                }
+            }
         }
-
-        setupInput()
-        setupOutput()
-
-        captureSession?.commitConfiguration()
-
-
     }
 }
